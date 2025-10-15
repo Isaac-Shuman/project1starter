@@ -27,7 +27,7 @@ uint32_t last_ack = 0;   // Last ACK number to keep track of duplicate ACKs
 bool pure_ack = false;  // Require ACK to be sent out
 packet* base_pkt = NULL; // Lowest outstanding packet to be sent out
 
-buffer_node* recv_buf =
+buffer_node* recv_buf = 
     NULL; // Linked list storing out of order received packets
 buffer_node* send_buf =
     NULL; // Linked list storing packets that were sent but not acknowledged
@@ -37,6 +37,8 @@ void (*output)(uint8_t*, size_t);   // Output data from layer
 
 struct timeval start; // Last packet sent at this time
 struct timeval now;   // Temp for current time
+
+void init_buffer(buffer_node** node);
 
 // Get data from standard input / make handshake packets
 packet* get_data() {
@@ -48,6 +50,15 @@ packet* get_data() {
     default: {
     }
     }
+
+    uint16_t length;
+    length = input(recv_buf->pkt.payload, MAX_PAYLOAD);
+    recv_buf->pkt.length = length;
+
+    if (length > 0)
+        return &recv_buf->pkt;
+    else
+        return NULL;
 }
 
 // Process data received from socket
@@ -61,6 +72,7 @@ void recv_data(packet* pkt) {
     default: {
     }
     }
+    output(pkt->payload, pkt->length);
 }
 
 // Main function of transport layer; never quits
@@ -99,6 +111,10 @@ void listen_loop(int sockfd, struct sockaddr_in* addr, int initial_state,
     packet* pkt = (packet*) &buffer;
     socklen_t addr_size = sizeof(struct sockaddr_in);
 
+    //Isaac: Initialize linked lists
+    init_buffer(&send_buf);
+    init_buffer(&recv_buf);
+
     // Start listen loop
     while (true) {
         memset(buffer, 0, sizeof(packet) + MAX_PAYLOAD);
@@ -107,13 +123,15 @@ void listen_loop(int sockfd, struct sockaddr_in* addr, int initial_state,
                                    (struct sockaddr*) addr, &addr_size);
         // If data, process it
         if (bytes_recvd > 0) {
-            print_diag(pkt, RECV);
+            //print_diag(pkt, RECV);
             recv_data(pkt);
         }
 
         packet* tosend = get_data();
         // Data available to send
         if (tosend != NULL) {
+            int packet_size = sizeof(buffer); //TODO: replace with actual packet_size
+            sendto(sockfd, tosend, packet_size, 0, (const struct sockaddr*) addr, addr_size);
         }
         // Received a packet and must send an ACK
         else if (pure_ack) {
@@ -131,4 +149,8 @@ void listen_loop(int sockfd, struct sockaddr_in* addr, int initial_state,
             gettimeofday(&start, NULL);
         }
     }
+}
+
+void init_buffer(buffer_node** node) {
+    *node = (buffer_node *) malloc(sizeof(buffer_node));
 }

@@ -7,3 +7,7 @@ This is new for Project 1. We ask you to include a file called `README.md` that 
 3. your solutions to those problems.
 
 This is not meant to be comprehensive; less than 300 words will suffice.
+
+
+Plan:
+Get it working with udp test cases
