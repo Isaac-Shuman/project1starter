@@ -15,7 +15,7 @@ function run_tests() {
     ./server 8080 < /tmp/test.bin > server.bin &
     ./client localhost 8080 < /tmp/test.bin > client.bin &
 
-    sleep 3
+    sleep 10
 
     wc server.bin
     wc client.bin

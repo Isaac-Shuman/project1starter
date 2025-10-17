@@ -9,6 +9,7 @@
 #include <sys/socket.h>
 #include <sys/time.h>
 #include <unistd.h>
+#include <assert.h>
 
 /*
  * the following variables are only informational,
@@ -39,9 +40,12 @@ struct timeval start; // Last packet sent at this time
 struct timeval now;   // Temp for current time
 
 void init_buffer(buffer_node** node);
+packet* get_last_packet(void);
+void update_sending_buffer(uint16_t ack_given);
 
 // Get data from standard input / make handshake packets
 packet* get_data() {
+    packet* pkt = &recv_buf->pkt;
     switch (state) {
     case SERVER_AWAIT:
     case CLIENT_AWAIT:
@@ -51,12 +55,25 @@ packet* get_data() {
     }
     }
 
-    uint16_t length;
-    length = input(recv_buf->pkt.payload, MAX_PAYLOAD);
-    recv_buf->pkt.length = length;
-
-    if (length > 0)
-        return &recv_buf->pkt;
+    if (our_send_window < their_receiving_window) {
+        uint16_t length;
+        length = input(pkt->payload, their_receiving_window - our_send_window);
+        pkt->length = length;
+        pkt->ack = ack;
+        pkt->seq = seq;
+        
+        //update sending state
+        seq += length;
+        our_send_window += length;
+        assert(our_send_window <= their_receiving_window);
+        
+        if (length > 0) {
+            base_pkt = pkt;
+            return pkt;
+        }
+        else
+            return NULL;
+    }
     else
         return NULL;
 }
@@ -72,7 +89,14 @@ void recv_data(packet* pkt) {
     default: {
     }
     }
-    output(pkt->payload, pkt->length);
+
+    if (pkt->seq == ack) { //if this is a new packet
+        //update recieving state
+        ack += pkt->length;
+
+        output(pkt->payload, pkt->length);
+    }
+    update_sending_buffer(pkt->ack);
 }
 
 // Main function of transport layer; never quits
@@ -130,16 +154,24 @@ void listen_loop(int sockfd, struct sockaddr_in* addr, int initial_state,
         packet* tosend = get_data();
         // Data available to send
         if (tosend != NULL) {
-            int packet_size = sizeof(buffer); //TODO: replace with actual packet_size
-            sendto(sockfd, tosend, packet_size, 0, (const struct sockaddr*) addr, addr_size);
+            tosend->ack = ack;
+            sendto(sockfd, tosend, sizeof(packet) + tosend->length, 0, (const struct sockaddr*) addr, addr_size);
         }
         // Received a packet and must send an ACK
         else if (pure_ack) {
+            packet* ack_pack = pkt;
+            ack_pack->length = 0;
+            ack_pack->ack = ack;
+            ack_pack->seq = seq;
+            sendto(sockfd, ack_pack, sizeof(packet) + ack_pack->length, 0, (const struct sockaddr*) addr, addr_size);
         }
 
         // Check if timer went off
         gettimeofday(&now, NULL);
         if (TV_DIFF(now, start) >= RTO && base_pkt != NULL) {
+            packet* toresend = get_last_packet();
+            toresend->ack = ack;
+            sendto(sockfd, toresend, sizeof(packet) + toresend->length, 0, (const struct sockaddr*) addr, addr_size);
         }
         // Duplicate ACKS detected
         else if (dup_acks == DUP_ACKS && base_pkt != NULL) {
@@ -153,4 +185,18 @@ void listen_loop(int sockfd, struct sockaddr_in* addr, int initial_state,
 
 void init_buffer(buffer_node** node) {
     *node = (buffer_node *) malloc(sizeof(buffer_node));
+}
+
+packet* get_last_packet(void) {
+    return base_pkt;
+}
+
+void update_sending_buffer(uint16_t ack_given) {
+    if (base_pkt != NULL) {
+        if (base_pkt->seq + base_pkt->length <= ack_given) {
+            our_send_window -= base_pkt->length;
+            assert(our_send_window >= 0);
+            base_pkt = NULL;
+        }
+    }
 }

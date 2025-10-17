@@ -11,3 +11,9 @@ After all, the autograder only needs a Makefile to compile binaries.
 * Green parts are our suggestions. Again, purely informational and feel free to use your own way.
 
 ![Architecture](./arch.png)
+
+
+
+Implement Stop and Wait
+    have the ack numbers and sequence number increment correctly assuming no loss
+    Implement resending
